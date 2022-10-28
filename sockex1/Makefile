@@ -1,14 +1,10 @@
 # SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
 
-XDP_TARGETS := sampleip_kern
-USER_TARGETS := sampleip_user
+XDP_TARGETS := sockex1_kern
+USER_TARGETS := sockex1_user
 
-LLC ?= llc
-CLANG ?= clang
-CC := gcc
-
-LIBBPF_DIR = ../libbpf/src/
 COMMON_DIR = ../common
+USER_LIBS = -lz
 
 include $(COMMON_DIR)/common.mk
 #COMMON_OBJS := $(COMMON_DIR)/common_params.o

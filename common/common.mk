@@ -20,13 +20,14 @@ USER_C := ${USER_TARGETS:=.c}
 USER_OBJ := ${USER_C:.c=.o}
 
 # Expect this is defined by including Makefile, but define if not
-COMMON_DIR ?= ../common/
-LIBBPF_DIR ?= ../libbpf/src/
+KERNEL_DIR ?= /opt/net-next
+COMMON_DIR ?= ../common
+HEADER_DIR ?= ../headers
+LIBBPF_DIR ?= ${KERNEL_DIR}/tools/bpf/resolve_btfids/libbpf
+LIBBPF_OBJ = ${LIBBPF_DIR}/libbpf.a
 
 COPY_LOADER ?=
 LOADER_DIR ?= $(COMMON_DIR)/../basic-solutions
-
-OBJECT_LIBBPF = $(LIBBPF_DIR)/libbpf.a
 
 # Extend if including Makefile already added some
 #COMMON_OBJS += $(COMMON_DIR)/common_params.o $(COMMON_DIR)/common_user_bpf_xdp.o
@@ -39,12 +40,22 @@ EXTRA_DEPS +=
 # BPF-prog kern and userspace shares struct via header file:
 KERN_USER_H ?= $(wildcard common_kern_user.h)
 
-CFLAGS ?= -I$(LIBBPF_DIR)/build/usr/include/ -g
-CFLAGS += -I../headers/
+CFLAGS ?= -g
+CFLAGS += -I${KERNEL_DIR}/tools/include
+CFLAGS += -I${KERNEL_DIR}/tools/lib
+CFLAGS += -I${KERNEL_DIR}/tools/perf
+CFLAGS += -I${KERNEL_DIR}/tools/testing/selftests/bpf
+CFLAGS += -I$(HEADER_DIR)
 LDFLAGS ?= -L$(LIBBPF_DIR)
 
-BPF_CFLAGS ?= -I$(LIBBPF_DIR)/build/usr/include/ -I../headers/
-
+BPF_CFLAGS ?=
+BPF_CFLAGS += -I$(HEADER_DIR)
+BPF_CFLAGS += -I${KERNEL_DIR}/usr/include
+BPF_CFLAGS += -I${KERNEL_DIR}/tools/include
+BPF_CFLAGS += -I${KERNEL_DIR}/tools/lib
+BPF_CFLAGS += -I${KERNEL_DIR}/tools/bpf/resolve_btfids/libbpf
+BPF_CFLAGS += -I${KERNEL_DIR}/tools/testing/selftests/bpf
+BPF_CFLAGS += -I${KERNEL_DIR}/include
 LIBS = -l:libbpf.a -lelf $(USER_LIBS)
 
 all: llvm-check $(USER_TARGETS) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
@@ -52,10 +63,7 @@ all: llvm-check $(USER_TARGETS) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
 .PHONY: clean $(CLANG) $(LLC)
 
 clean:
-	rm -rf $(LIBBPF_DIR)/build
-	$(MAKE) -C $(LIBBPF_DIR) clean
-	$(MAKE) -C $(COMMON_DIR) clean
-	rm -f $(USER_TARGETS) $(XDP_OBJ) $(USER_OBJ) $(COPY_LOADER) $(COPY_STATS)
+	rm -f $(USER_TARGETS) $(USER_TARGETS:_user=) $(XDP_OBJ) $(USER_OBJ) $(COPY_LOADER) $(COPY_STATS)
 	rm -f *.ll
 	rm -f *~
 
@@ -77,7 +85,7 @@ endif
 COMMON_MK = $(COMMON_DIR)/common.mk
 
 vmlinux.h:
-	sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > ../headers/vmlinux.h
+	sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(HEADER_DIR)/vmlinux.h
 
 llvm-check: $(CLANG) $(LLC)
 	@for TOOL in $^ ; do \
@@ -87,7 +95,7 @@ llvm-check: $(CLANG) $(LLC)
 		else true; fi; \
 	done
 
-$(OBJECT_LIBBPF):
+$(LIBBPF_OBJ):
 	@if [ ! -d $(LIBBPF_DIR) ]; then \
 		echo "Error: Need libbpf submodule"; \
 		echo "May need to run git submodule update --init"; \
@@ -106,19 +114,29 @@ $(COMMON_H): %.h: %.c
 $(COMMON_OBJS): %.o: %.h
 	make -C $(COMMON_DIR)
 
-$(USER_TARGETS): %: %.c  $(OBJECT_LIBBPF) Makefile $(COMMON_MK) $(COMMON_OBJS) $(KERN_USER_H) $(EXTRA_DEPS)
-	$(CC) -Wall $(CFLAGS) $(LDFLAGS) -o $@ $(COMMON_OBJS) \
+$(USER_TARGETS): %: %.c  $(LIBBPF_OBJ) Makefile $(COMMON_MK) $(COMMON_OBJS) $(KERN_USER_H) $(EXTRA_DEPS)
+	$(CC) -Wall -O2 -Wmissing-prototypes -Wstrict-prototypes $(CFLAGS) $(LDFLAGS) -o ${@:_user=} $(COMMON_OBJS) \
 	 $< $(LIBS)
 
 $(XDP_OBJ): %.o: %.c  Makefile $(COMMON_MK) $(KERN_USER_H) $(EXTRA_DEPS) $(OBJECT_LIBBPF)
 	$(CLANG) -S \
+	    -nostdinc \
 	    -target bpf \
-	    -D __BPF_TRACING__ \
+	    -D__KERNEL__ \
+	    -D__BPF_TRACING__ \
+	    -include ${KERNEL_DIR}/include/linux/compiler-version.h \
+	    -include ${KERNEL_DIR}/include/linux/kconfig.h \
 	    $(BPF_CFLAGS) \
+	    -fno-stack-protector -g \
 	    -Wall \
+	    -Werror \
 	    -Wno-unused-value \
 	    -Wno-pointer-sign \
 	    -Wno-compare-distinct-pointer-types \
-	    -Werror \
-	    -O2 -emit-llvm -c -g -o ${@:.o=.ll} $<
+	    -Wno-gnu-variable-sized-type-not-at-end \
+	    -Wno-address-of-packed-member \
+	    -Wno-tautological-compare \
+	    -Wno-unknown-warning-option  \
+	    -fno-asynchronous-unwind-tables \
+	    -O2 -emit-llvm -Xclang -disable-llvm-passes -c -o ${@:.o=.ll} $<
 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
