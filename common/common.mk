@@ -41,22 +41,31 @@ EXTRA_DEPS +=
 KERN_USER_H ?= $(wildcard common_kern_user.h)
 
 CFLAGS ?= -g
-CFLAGS += -I${KERNEL_DIR}/tools/include
-CFLAGS += -I${KERNEL_DIR}/tools/lib
-CFLAGS += -I${KERNEL_DIR}/tools/perf
-CFLAGS += -I${KERNEL_DIR}/tools/testing/selftests/bpf
+CFLAGS += -I$(KERNEL_DIR)/tools/include
+CFLAGS += -I$(KERNEL_DIR)/tools/lib
+CFLAGS += -I$(KERNEL_DIR)/tools/perf
+CFLAGS += -I$(KERNEL_DIR)/tools/testing/selftests/bpf
 CFLAGS += -I$(HEADER_DIR)
 LDFLAGS ?= -L$(LIBBPF_DIR)
 
 BPF_CFLAGS ?=
+BPF_CFLAGS += -I$(KERNEL_DIR)/arch/x86/include
+BPF_CFLAGS += -I$(KERNEL_DIR)/arch/x86/include/generated
+BPF_CFLAGS += -I$(KERNEL_DIR)/include
+BPF_CFLAGS += -I$(KERNEL_DIR)/arch/x86/include/uapi
+BPF_CFLAGS += -I$(KERNEL_DIR)/arch/x86/include/generated/uapi
+BPF_CFLAGS += -I$(KERNEL_DIR)/include/uapi
+BPF_CFLAGS += -I$(KERNEL_DIR)/include/generated/uapi
+BPF_CFLAGS += -I$(KERNEL_DIR)/samples/bpf
+BPF_CFLAGS += -I$(KERNEL_DIR)/tools/testing/selftests/bpf
+BPF_CFLAGS += -I$(KERNEL_DIR)/tools/testing/selftests/bpf/tools/include
+BPF_CFLAGS += -I$(KERNEL_DIR)/samples/bpf/libbpf/include
+BPF_CFLAGS += -include $(KERNEL_DIR)/include/linux/compiler-version.h
+BPF_CFLAGS += -include $(KERNEL_DIR)/include/linux/kconfig.h
+BPF_CFLAGS += -include $(KERNEL_DIR)/samples/bpf/asm_goto_workaround.h
 BPF_CFLAGS += -I$(HEADER_DIR)
-BPF_CFLAGS += -I${KERNEL_DIR}/usr/include
-BPF_CFLAGS += -I${KERNEL_DIR}/tools/include
-BPF_CFLAGS += -I${KERNEL_DIR}/tools/lib
-BPF_CFLAGS += -I${KERNEL_DIR}/tools/bpf/resolve_btfids/libbpf
-BPF_CFLAGS += -I${KERNEL_DIR}/tools/testing/selftests/bpf
-BPF_CFLAGS += -I${KERNEL_DIR}/include
-LIBS = -l:libbpf.a -lelf $(USER_LIBS)
+
+LIBS = -l:libbpf.a -lelf -lz $(USER_LIBS)
 
 all: llvm-check $(USER_TARGETS) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
 
@@ -123,24 +132,18 @@ $(USER_TARGETS): %: %.c  $(LIBBPF_OBJ) Makefile $(COMMON_MK) $(COMMON_OBJS) $(KE
 	    $< $(LIBS)
 
 $(XDP_OBJ): %.o: %.c  Makefile $(COMMON_MK) $(KERN_USER_H) $(EXTRA_DEPS) $(OBJECT_LIBBPF)
-	$(CLANG) -S \
-	    -nostdinc \
-	    -target bpf \
+	$(CLANG) -S -nostdinc -fno-stack-protector -g \
+	    ${BPF_CFLAGS} \
 	    -D__KERNEL__ \
 	    -D__BPF_TRACING__ \
-	    -include ${KERNEL_DIR}/include/linux/compiler-version.h \
-	    -include ${KERNEL_DIR}/include/linux/kconfig.h \
-	    $(BPF_CFLAGS) \
-	    -fno-stack-protector -g \
-	    -Wall \
-	    -Werror \
-	    -Wno-unused-value \
-	    -Wno-pointer-sign \
+	    -D__TARGET_ARCH_x86 \
+	    -Wno-unused-value -Wno-pointer-sign \
 	    -Wno-compare-distinct-pointer-types \
 	    -Wno-gnu-variable-sized-type-not-at-end \
 	    -Wno-address-of-packed-member \
 	    -Wno-tautological-compare \
 	    -Wno-unknown-warning-option  \
 	    -fno-asynchronous-unwind-tables \
-	    -O2 -emit-llvm -c -o ${@:.o=.ll} $<
-	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
+	    -O2 -emit-llvm -Xclang -disable-llvm-passes \
+	    -c $< -o - | opt -O2 -mtriple=bpf-pc-linux | llvm-dis | \
+	    $(LLC) -march=bpf -filetype=obj -o $@
