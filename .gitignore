@@ -50,3 +50,5 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+/sockex1/sockex1
+/xdp_fwd/xdp_fwd
