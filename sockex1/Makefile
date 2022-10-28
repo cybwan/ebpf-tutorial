@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+# SPDX-License-Identifier: (Apache-2.0)
 
 XDP_TARGETS := sockex1_kern
 USER_TARGETS := sockex1_user

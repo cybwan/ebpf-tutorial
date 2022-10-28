@@ -1,6 +1,6 @@
 # Common Makefile parts for BPF-building with libbpf
 # --------------------------------------------------
-# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+# SPDX-License-Identifier: (Apache-2.0)
 #
 # This file should be included from your Makefile like:
 #  COMMON_DIR = ../common/
