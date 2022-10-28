@@ -63,7 +63,7 @@ all: llvm-check $(USER_TARGETS) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
 .PHONY: clean $(CLANG) $(LLC)
 
 clean:
-	rm -f $(USER_TARGETS) $(USER_TARGETS:_user=) $(XDP_OBJ) $(USER_OBJ) $(COPY_LOADER) $(COPY_STATS)
+	rm -f $(USER_TARGETS) $(USER_TARGETS:_user=) .$(USER_TARGETS).d $(XDP_OBJ) $(USER_OBJ) $(COPY_LOADER) $(COPY_STATS)
 	rm -f *.ll
 	rm -f *~
 
@@ -84,8 +84,8 @@ endif
 # For build dependency on this file, if it gets updated
 COMMON_MK = $(COMMON_DIR)/common.mk
 
-vmlinux.h:
-	sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(HEADER_DIR)/vmlinux.h
+#vmlinux.h:
+#	sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(HEADER_DIR)/vmlinux.h
 
 llvm-check: $(CLANG) $(LLC)
 	@for TOOL in $^ ; do \
@@ -115,8 +115,12 @@ $(COMMON_OBJS): %.o: %.h
 	make -C $(COMMON_DIR)
 
 $(USER_TARGETS): %: %.c  $(LIBBPF_OBJ) Makefile $(COMMON_MK) $(COMMON_OBJS) $(KERN_USER_H) $(EXTRA_DEPS)
-	$(CC) -Wall -O2 -Wmissing-prototypes -Wstrict-prototypes $(CFLAGS) $(LDFLAGS) -o ${@:_user=} $(COMMON_OBJS) \
-	 $< $(LIBS)
+	$(CC)  -Wp,-MD,.$@.d \
+	    -Wall -O2 -Wmissing-prototypes -Wstrict-prototypes \
+	    $(CFLAGS) \
+	    $(LDFLAGS)\
+	    -o ${@:_user=} $(COMMON_OBJS) \
+	    $< $(LIBS)
 
 $(XDP_OBJ): %.o: %.c  Makefile $(COMMON_MK) $(KERN_USER_H) $(EXTRA_DEPS) $(OBJECT_LIBBPF)
 	$(CLANG) -S \
@@ -138,5 +142,5 @@ $(XDP_OBJ): %.o: %.c  Makefile $(COMMON_MK) $(KERN_USER_H) $(EXTRA_DEPS) $(OBJEC
 	    -Wno-tautological-compare \
 	    -Wno-unknown-warning-option  \
 	    -fno-asynchronous-unwind-tables \
-	    -O2 -emit-llvm -Xclang -disable-llvm-passes -c -o ${@:.o=.ll} $<
+	    -O2 -emit-llvm -c -o ${@:.o=.ll} $<
 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
